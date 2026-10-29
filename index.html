@@ -2575,6 +2575,8 @@ const GK='f17-groq-key', GM='f17-groq-model', GC='f17-studio-v1', DEFMODEL='llam
 const lsGet=k=>{ try{ return localStorage.getItem(k)||''; }catch(e){ return MEMLS[k]||''; } };
 const lsSet=(k,v)=>{ try{ localStorage.setItem(k,v); }catch(e){ MEMLS[k]=v; } };
 const MEMLS={};
+const cleanKey=k=>String(k||'').replace(/[^\x21-\x7E]/g,'');
+const getKey=()=>cleanKey(lsGet(GK));
 function stCache(){ try{ return JSON.parse(lsGet(GC)||'{}'); }catch(e){ return {}; } }
 function stGet(id){ return stCache()[id]||null; }
 function stSet(id,lines){ const c=stCache(); c[id]=lines; const ks=Object.keys(c); if(ks.length>25) delete c[ks[0]]; lsSet(GC,JSON.stringify(c)); }
@@ -2593,13 +2595,13 @@ Kasa: ${[m.home,m.away].map(c=>`${cname(c)} ${money(S.budget[c])}`).join(' | ')}
 }
 const ST_SYS=`Sen bir Türk spor TV'si "FIFA 17 Lig Stüdyo" için canlı maç sonu programı senaryosu yazıyorsun. Kulüpler dört arkadaşın FIFA 17 ligindeki kurgusal kulüplerdir. Karakterler kurgusaldır: "cem" (sunucu, düzenli), "riza" (eski futbolcu, tecrübeli, sakin), "selin" (polemikçi, iğneleyici, esprili), "hasan" (telefondaki taraftar, duygusal, abartılı). Sadece verilen bilgilere dayan: skor, golcüler, kartlar, puan durumu, form, kasa. Verilmeyen istatistik uydurma. Gerçek kişi, gerçek kulüp veya gerçek hakem ismi kullanma. Küfür etme, ama espri, laf sokma ve tribün havası olsun. Doğal, kısa, konuşma dilinde yaz. Her satır en fazla 220 karakter. SADECE şu JSON'u döndür: {"lines":[{"s":"cem","t":"..."}, ...]}`;
 async function groqModels(){
-  const r=await fetch('https://api.groq.com/openai/v1/models',{headers:{'Authorization':'Bearer '+lsGet(GK)}}); if(!r.ok) throw new Error('Model listesi alınamadı ('+r.status+')');
+  const r=await fetch('https://api.groq.com/openai/v1/models',{headers:{'Authorization':'Bearer '+getKey()}}); if(!r.ok) throw new Error('Model listesi alınamadı ('+r.status+')');
   const ids=((await r.json()).data||[]).map(x=>x.id).filter(id=>!/whisper|tts|guard|orpheus|embed|playai|distil|safeguard|compound/i.test(id));
   const pref=[/llama-3\.3-70b/,/gpt-oss-120b/,/llama-4/,/qwen/,/gpt-oss-20b/,/llama-3\.1/];
   for(const re of pref){ const f=ids.find(i=>re.test(i)); if(f) return f; } return ids[0]||null;
 }
 async function groqCall(sys,user,retry){
-  const key=lsGet(GK); if(!key) throw new Error('NOKEY');
+  const key=getKey(); if(!key) throw new Error('NOKEY');
   const body={model:lsGet(GM)||DEFMODEL,messages:[{role:'system',content:sys},{role:'user',content:user}],temperature:.9,max_tokens:1500};
   if(retry!=='nojson') body.response_format={type:'json_object'};
   const r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Authorization':'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -2637,7 +2639,7 @@ function speakLines(lines){
   run(0);
 }
 function studioTab(){
-  const played=ms().filter(m=>m.played).reverse(), mid=UI.stm&&played.some(m=>m.id===UI.stm)?UI.stm:(played[0]?.id||null), m=mid?S.matches.find(x=>x.id===mid):null, lines=mid?(stGet(mid)||[]):[], hasKey=!!lsGet(GK);
+  const played=ms().filter(m=>m.played).reverse(), mid=UI.stm&&played.some(m=>m.id===UI.stm)?UI.stm:(played[0]?.id||null), m=mid?S.matches.find(x=>x.id===mid):null, lines=mid?(stGet(mid)||[]):[], hasKey=!!getKey();
   SP.lines=lines; UI.stm=mid;
   const settings=`<div class="card"><h3>Yapay zekâ ayarı (Groq)</h3><div class="grid g2"><div class="field"><label for="st-key">Groq API anahtarı</label><input type="password" id="st-key" autocomplete="off" placeholder="${hasKey?'Kayıtlı (değiştirmek için yeniden gir)':'gsk_…'}"></div><div class="field"><label for="st-model">Model</label><input type="text" id="st-model" value="${esc(lsGet(GM)||DEFMODEL)}"></div></div>
    <div class="row wrap"><button class="btn" data-act="stSaveKey">Kaydet</button><button class="btn" data-act="stAuto">Uygun modeli otomatik seç</button>${hasKey?'<button class="btn ghost" data-act="stDelKey">Anahtarı sil</button><span class="pill good">Anahtar bu cihazda kayıtlı</span>':'<span class="pill">Anahtar yok: şablon program çalışır</span>'}</div>
@@ -2656,13 +2658,13 @@ function studioTab(){
 }
 async function stRun(fn){ UI.stbusy=true; UI.sterr=''; render(); try{ await fn(); }catch(e){ UI.sterr=e.message==='NOKEY'?'':(/Failed to fetch|NetworkError|Load failed/i.test(e.message)?'Groq\'a bağlanılamadı. Yayındaki sayfa dış bağlantıya izin vermiyor olabilir: indirdiğin fifa17-lig.html dosyasını aç ve orada dene.':e.message); if(e.message==='NOKEY') toast('Şablon program','Groq anahtarı yok, kısa şablon gösterildi',''); } UI.stbusy=false; render(); }
 const STUDIO_ACTS={
- stSaveKey:()=>{ const k=($('#st-key').value||'').trim(), m=($('#st-model').value||'').trim(); if(k) lsSet(GK,k); lsSet(GM,m||DEFMODEL); toast('Kaydedildi',k?'Anahtar bu cihaza kaydedildi':'Model güncellendi','good'); UI.sterr=''; render(); },
- stAuto:()=>{ if(!lsGet(GK)){ toast('Anahtar yok','Önce anahtarı kaydet',''); return; } stRun(async()=>{ const m=await groqModels(); if(!m) throw new Error('Uygun model bulunamadı.'); lsSet(GM,m); toast('Model seçildi',m,'good'); }); },
+ stSaveKey:()=>{ const k=($('#st-key').value||'').trim(), m=($('#st-model').value||'').trim(); if(k){ const ck=cleanKey(k); if(!/^gsk_[A-Za-z0-9]{20,}$/.test(ck)){ UI.sterr='Anahtar geçersiz görünüyor. Groq panelinden anahtarı kopyalayıp (gsk_ ile başlar) tek parça olarak yapıştır.'; render(); return; } lsSet(GK,ck); } lsSet(GM,m||DEFMODEL); toast('Kaydedildi',k?'Anahtar bu cihaza kaydedildi':'Model güncellendi','good'); UI.sterr=''; render(); },
+ stAuto:()=>{ if(!getKey()){ toast('Anahtar yok','Önce anahtarı kaydet',''); return; } stRun(async()=>{ const m=await groqModels(); if(!m) throw new Error('Uygun model bulunamadı.'); lsSet(GM,m); toast('Model seçildi',m,'good'); }); },
  stDelKey:()=>{ lsSet(GK,''); toast('Silindi','Anahtar bu cihazdan kaldırıldı',''); render(); },
  stPick:el=>{ stopSpeak(); UI.stm=el.value; UI.sterr=''; render(); },
  stPlay:()=>{ const L=stGet(UI.stm)||SP.lines; if(L&&L.length) speakLines(L); },
  stStop:()=>stopSpeak(),
- stGen:()=>{ const m=S.matches.find(x=>x.id===UI.stm); if(!m) return; stopSpeak(); stRun(async()=>{ if(!lsGet(GK)){ stSet(m.id,studioFallback(m)); throw new Error('NOKEY'); } stSet(m.id,await groqCall(ST_SYS,studioCtx(m)+'\n\n12-16 satırlık maç sonu programı yaz: sunucu açılışı, maçın analizi, kulüplerin durumu, bir polemik, taraftar telefonu, sunucu kapanışı.')); }); },
+ stGen:()=>{ const m=S.matches.find(x=>x.id===UI.stm); if(!m) return; stopSpeak(); stRun(async()=>{ if(!getKey()){ stSet(m.id,studioFallback(m)); throw new Error('NOKEY'); } stSet(m.id,await groqCall(ST_SYS,studioCtx(m)+'\n\n12-16 satırlık maç sonu programı yaz: sunucu açılışı, maçın analizi, kulüplerin durumu, bir polemik, taraftar telefonu, sunucu kapanışı.')); }); },
  stAsk:()=>{ const m=S.matches.find(x=>x.id===UI.stm), q=($('#st-q').value||'').trim(); if(!m||!q) return; stRun(async()=>{ const old=stGet(m.id)||[]; const add=await groqCall(ST_SYS,studioCtx(m)+`\n\nŞu ana kadar konuşulanlar: ${old.slice(-6).map(x=>x.s+': '+x.t).join(' / ')}\n\nSeyirciden soru geldi: "${q}". Sunucu soruyu okusun, yorumcular ve taraftar 4-6 satırda cevap versin.`); stSet(m.id,[...old,{s:'cem',t:`Seyirci sorusu: ${q}`},...add]); }); },
  studio:el=>{ UI.stm=el.dataset.id; UI.sm='studio'; UI.sterr=''; go('sosyal'); }
 };
